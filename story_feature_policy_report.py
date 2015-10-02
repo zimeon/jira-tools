@@ -16,6 +16,11 @@ from datetime import datetime,date
 import os
 
 
+# Global setup
+PRIORITY_TO_VALUE = { 'Critical': 3, 'Major': 2, 'Low': 1 }
+VALUE_TO_PRIORITY = dict((v, k) for k, v in PRIORITY_TO_VALUE.iteritems())
+PRIORITIES = sorted(PRIORITY_TO_VALUE.keys(), key=lambda x: -PRIORITY_TO_VALUE[x]) #highest first
+
 def html_to_tex(html):
     """Simple wrapper for html2txt with some options and tweak to make TeX."""
     h = html2text.HTML2Text()
@@ -26,7 +31,7 @@ def html_to_tex(html):
     # Deal with some TeX issues
     # http://tex.stackexchange.com/questions/34580/escape-character-in-latex
     txt = re.sub(r'([\&%$#_\{\}])', r'\\\g<1>', txt)
-    # Remove markdown links
+    # Replace markdown links with TeX hyperlinks
     txt = re.sub(r'\[[A-Z]+-\d+\]\([^\)]+/([A-Z]+-\d+)\)',
                  r'\\hyperlink{\g<1>}{\g<1>}',
                  txt)
@@ -37,13 +42,13 @@ def html_to_tex(html):
 
 def issue_number(issue):
     """Return issue number extracted from issue['key']."""
-    m = re.match(r'IRS\-(\d+)',issue['key'])
+    m = re.match(r'[A-Z]+\-(\d+)',issue['key'])
     return( int(m.group(1)) if (m) else 0 )
 
 
 def key_number(key):
     """Return issue number extracted from key."""
-    m = re.match(r'IRS\-(\d+)',key)
+    m = re.match(r'[A-Z]+\-(\d+)',key)
     return( int(m.group(1)) if (m) else 0 )
 
 
@@ -66,11 +71,11 @@ def query_jira(query,username,password,fields=None,options=None):
         
     uri = "%s/sr/jira.issueviews:searchrequest-xml/temp/SearchRequest.xml?%s" % (baseuri,urllib.urlencode(params))
     if (options.show_uri):
-        print uri
+        print(uri)
         sys.exit(0)
     f = urllib.urlopen(uri)
     if (options.show_xml):
-        print f.read()
+        print(f.read())
         sys.exit(0)
     # return parsed etree
     return ElementTree.parse(f)
@@ -119,7 +124,7 @@ def parse_issue_links(el):
             else:
                 raise Exception("Unexpected outward link: %s" % (linktype))
             for issuekey in outwardlink.findall('./issuelink/issuekey'):
-                #print issuekey.text
+                #print(issuekey.text)
                 if (linktype not in links):
                     links[linktype]=[]
                 links[linktype].append(issuekey.text)
@@ -130,7 +135,7 @@ def parse_issue_links(el):
             else:
                 raise Exception("Unexpected inward link: %s" % (linktype))
             for issuekey in inwardlink.findall('./issuelink/issuekey'):
-                #print issuekey.text
+                #print(issuekey.text)
                 if (linktype not in links):
                     links[linktype]=[]
                 links[linktype].append(issuekey.text)
@@ -195,7 +200,7 @@ def split_jira_results(tree, fields):
         key = args['key']
         args['keytarget'] = "\\hypertarget{%s}{}" % (key)
         args['keyref'] = "\\hyperlink{%s}{%s}" % (key,key)
-        #print key+" --epic--> "+args['epic']
+        #print(key+" --epic--> "+args['epic'])
         # What type is this?
         if (args['type'] == 'New Feature'):
             args['type'] = 'Feature'
@@ -203,7 +208,7 @@ def split_jira_results(tree, fields):
             if (summary == args['summary'] ): 
                 raise Exception("%s: is Feature but without summary prefix '%s'" % (key,args['summary']))
             args['summary'] = summary
-            if (args['priority'] not in ['Critical','Major','Low']):
+            if (args['priority'] not in PRIORITIES):
                 raise Exception("%s: is Feature with bad priority %s" % (key, args['priority']))
             features.append(args)
         elif (args['type'] == 'Policy Question'):
@@ -249,10 +254,11 @@ def add_story_epics(issues, user_stories_by_key):
                     epic_names.add(story['epic_name'])
                     keep.append(target)
                 else:
-                    print "ooops.. non story %s linked from %s, deleted" % (target,issue['key'])
+                    print("Non-story %s linked from %s, link ignored" % (target,issue['key']))
             # replace with the list of keepers
             issue['issuelinks'][linktype] = keep
         issue['issuelinks']['User story groups'] = list(epic_names)
+
 
 def add_related(issues):
     """Add related field built from issuelink."""
@@ -264,6 +270,40 @@ def add_related(issues):
                 for target in sorted(issue['issuelinks'][linktype], key = key_number):
                     targets.append("\\hyperlink{%s}{%s}" % (target, target))
                 issue['related'] += '\n'+linktype+': '+', '.join(targets)+'\n'
+
+
+def infer_story_priorities(features, policies, user_stories):
+    """Infer story priorities from feature and policy priorities.
+
+    The story priority will be the lowest of the priorities of the features
+    and policies it relies upon.
+
+    This is really a backwards process, it would seem to make more sense
+    to prioritize the user stories and then infer feature and policy 
+    priorities from that.
+    """
+    for issue in user_stories:
+        priority = None
+        if ('Relies on' in issue['issuelinks']):
+            for target in issue['issuelinks']['Relies on']:
+                # FIXME - this is mindblowingly inefficient! need lookup by key for features, policies
+                priority = None
+                for t in (features + policies):
+                    if (t['key'] == target):
+                        p = t['priority']
+                if (p is None):
+                    raise Exception("Cannot find %s in features or priorities" % (target))
+                if (priority is None or p<priority):
+                    priority = p
+        else:
+            print("Issue %s does not rely on any feature or policy" % (issue['key']))
+        if (priority is None):
+            priority = 'Low'
+        elif (priority in issue and issue['priority'] != priority):
+            print("%s has a priority %s, which differs from inferred priority %s" % (issue['key'], issue['priority'], priority))
+        issue['priority'] = priority
+            
+
 
 ### Options
 #
@@ -314,6 +354,7 @@ add_story_epics(policies, user_stories_by_key)
 add_related(features)
 add_related(policies)
 add_related(user_stories)
+infer_story_priorities(features, policies, user_stories)
 
 script_dir = os.path.dirname(__file__)
 template_dir = os.path.join(script_dir,'templates')
@@ -339,7 +380,7 @@ feature_template = """{keytarget}
 
 """
 features_txt = ''
-for priority in ('Critical','Major','Low'):
+for priority in PRIORITIES:
     features_txt += "\subsection{{%s priority features}}\n\n" % (priority) 
     for issue in sorted(features, key = issue_number):
         if (issue['priority'] == priority):
@@ -353,7 +394,7 @@ policy_template = """{keytarget}
 
 """
 policies_txt = ''
-for priority in ('Critical','Major','Low'):
+for priority in PRIORITIES:
     policies_txt += "\subsection{{%s priority policies}}\n\n" % (priority)
     for issue in sorted(policies, key = issue_number):
         if (issue['priority'] == priority):
@@ -361,7 +402,7 @@ for priority in ('Critical','Major','Low'):
         
 
 user_stories_template = """{keytarget}
-\subsubsection{{User story: {description} ({key}, {epic_name})}}
+\subsubsection{{User story: {description} ({key}, {epic_name}, {priority})}}
 
 {related}
 
@@ -372,7 +413,7 @@ for issue in user_stories:
     epic_names.add(issue['epic_name'])
 for epic_name in sorted(epic_names):
     user_stories_txt += "\\hypertarget{%s}{}\n\subsection{%s}\n\n" % (epic_name,epic_name)
-    for issue in sorted(user_stories, key = issue_number):
+    for issue in sorted(user_stories, key = lambda i: ((4 - PRIORITY_TO_VALUE[i['priority']]) * 10000 + issue_number(i))):
         if (issue['epic_name'] == epic_name):
             if (issue['related'] == ''):
                 issue['related'] = "\\textit{No features or policies have been associated with this user story.}\n";
@@ -388,4 +429,4 @@ filename = template_prefix+'report.tex'
 fh = open(filename,'w')
 fh.write(txt)
 fh.close()
-print "Written %s, done." % (filename)
+print("Written %s, done." % (filename))
