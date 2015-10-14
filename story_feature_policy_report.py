@@ -80,12 +80,14 @@ def query_jira(query,username,password,fields=None,options=None):
     # return parsed etree
     return ElementTree.parse(f)
 
+
 relation_translations = {
     'relates to': 'Is related to',
     'is related to': 'Is related to',
-    'is relied upon by': 'User stories supported',
+    'is relied upon by': 'Is relied upon by',
     'relies on': 'Relies on',
 }
+
 
 def parse_issue_links(el):
     """Parse issuelinks in etree element el
@@ -217,9 +219,13 @@ def split_jira_results(tree, fields):
             if (summary == args['summary'] ):
                 raise Exception("%s: is Policy but without summary prefix '%s'" % (key,args['summary']))
             args['summary'] = summary
+            if (args['priority'] not in PRIORITIES):
+                raise Exception("%s: is Policy with bad priority %s" % (key, args['priority']))
             policies.append(args)
         elif (args['type'] == 'User Story'):
             user_stories.append(args)
+            if (args['priority'] not in PRIORITIES):
+                raise Exception("%s: is User Story with bad priority %s" % (key, args['priority']))
         elif (args['type'] == 'Epic'):
             epics.append(args)
         else:
@@ -240,10 +246,11 @@ def add_epic_names(issues, epics):
                     break
             if ('epic_name' not in issue):
                 raise Exception("%s: Failed to find epic name for %s" % (issue['key'],epic_key))
-                
+
+
 def add_story_epics(issues, user_stories_by_key):
     """Add a field story_epics to each issue in issues base on the epics its stories rely on"""
-    linktype = 'User stories supported'
+    linktype = 'Is relied upon by'
     for issue in issues:
         epic_names = set()
         if (issue['issuelinks'] and linktype in issue['issuelinks']):
@@ -272,37 +279,82 @@ def add_related(issues):
                 issue['related'] += '\n'+linktype+': '+', '.join(targets)+'\n'
 
 
-def infer_story_priorities(features, policies, user_stories):
-    """Infer story priorities from feature and policy priorities.
+def get_issue(issues, target, msg="issues"):
+    """Lookup issue based on the key.
 
-    The story priority will be the lowest of the priorities of the features
-    and policies it relies upon.
+    FIXME - This is mindblowingly inefficient! need lookup by key
+    """
+    for t in (issues):
+        if (t['key'] == target):
+            return(t)
+    raise Exception("Cannot find %s in %s" % (target,msg))
+    
 
-    This is really a backwards process, it would seem to make more sense
+def infer_feature_policy_priorities(user_stories, other, fp, modify=True):
+    """Infer feature and policy priorities from user_story priorities
+
+    The inferred feature or policy priority will be the highest of the priorities
+    of the stories that rely upon it. For policies we also look through 
+    the other issues which will be features and take the highest of these
+    priorities. This implies that feature priorities must be inferred 
+    before policy priorities.
+
+    
+    """
+    for issue in fp:
+        priority = None
+        if ('Is relied upon by' in issue['issuelinks']):
+            for target in issue['issuelinks']['Is relied upon by']:
+                t = get_issue(user_stories + other, target)
+                p = t['priority']
+                if (priority is None or PRIORITY_TO_VALUE[p]>PRIORITY_TO_VALUE[priority]):
+                    priority = p
+        else:
+            print("Issue %s is not relied upon by any issue" % (issue['key']))
+        if (priority is None):
+            print("No priority calculated for %s, treating as Low" % (issue['key']))
+            priority = 'Low'
+        elif (PRIORITY_TO_VALUE[issue['priority']]<PRIORITY_TO_VALUE[priority]):
+            print("%s has priority %s, which is LOWER from inferred priority %s" % (issue['key'], issue['priority'], priority))
+            if (modify):
+                print("%s priority changed %s -> %s" % (issue['key'], issue['priority'], priority))
+                issue['priority'] = priority
+        elif (PRIORITY_TO_VALUE[issue['priority']]>PRIORITY_TO_VALUE[priority]):
+            print("%s has priority %s, which is higher than inferred priority %s" % (issue['key'], issue['priority'], priority))
+            
+
+def check_story_priorities(features, policies, user_stories, modify=False):
+    """Infer story priorities from feature and policy priorities as a sanity check.
+
+    The story priority calculated will be the lowest of the priorities of the 
+    features and policies it relies upon. A warning will be shown if the actual
+    story priority is lower than this.
+
+    If modify is true, then instead of showing a warning, the priority will be
+    changed. This is a BACKWARDS process, it makes more sense
     to prioritize the user stories and then infer feature and policy 
-    priorities from that.
+    priorities from that. See infer_feature_policy_priorities().
     """
     for issue in user_stories:
         priority = None
         if ('Relies on' in issue['issuelinks']):
             for target in issue['issuelinks']['Relies on']:
-                # FIXME - this is mindblowingly inefficient! need lookup by key for features, policies
-                priority = None
-                for t in (features + policies):
-                    if (t['key'] == target):
-                        p = t['priority']
+                t = get_issue(features + policies, target)
+                p = t['priority']
                 if (p is None):
                     raise Exception("Cannot find %s in features or priorities" % (target))
-                if (priority is None or p<priority):
+                if (priority is None or PRIORITY_TO_VALUE[p]<PRIORITY_TO_VALUE[priority]):
                     priority = p
         else:
             print("Issue %s does not rely on any feature or policy" % (issue['key']))
         if (priority is None):
+            print("No priority calculated for %s, treating as Low" % (issue['key']))
             priority = 'Low'
-        elif (priority in issue and issue['priority'] != priority):
-            print("%s has a priority %s, which differs from inferred priority %s" % (issue['key'], issue['priority'], priority))
-        issue['priority'] = priority
-            
+        elif (PRIORITY_TO_VALUE[issue['priority']]<PRIORITY_TO_VALUE[priority]):
+            print("%s has priority %s, lower than inferred priority %s" % (issue['key'], issue['priority'], priority))
+            if (modify):
+                print("Setting %s to priority %s" % (issue['key'],priority))
+                issue['priority'] = priority
 
 
 ### Options
@@ -354,7 +406,17 @@ add_story_epics(policies, user_stories_by_key)
 add_related(features)
 add_related(policies)
 add_related(user_stories)
-infer_story_priorities(features, policies, user_stories)
+
+# Adjust feature and policy priorities based on user story priorities
+print("\nChecking/inferring feature priorities")
+infer_feature_policy_priorities(user_stories, [], features)
+print("\nChecking/inferring policy priorities")
+infer_feature_policy_priorities(user_stories, features, policies)
+
+# Sanity check than inference the other way works...
+print("\nChecking story priorities")
+check_story_priorities(features, policies, user_stories)
+print("")
 
 script_dir = os.path.dirname(__file__)
 template_dir = os.path.join(script_dir,'templates')
