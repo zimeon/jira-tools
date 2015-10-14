@@ -315,7 +315,7 @@ def infer_feature_policy_priorities(user_stories, other, fp, modify=True):
             print("No priority calculated for %s, treating as Low" % (issue['key']))
             priority = 'Low'
         elif (PRIORITY_TO_VALUE[issue['priority']]<PRIORITY_TO_VALUE[priority]):
-            print("%s has priority %s, which is LOWER from inferred priority %s" % (issue['key'], issue['priority'], priority))
+            print("INCONSISTENCY: %s has priority %s, which is lower from inferred priority %s" % (issue['key'], issue['priority'], priority))
             if (modify):
                 print("%s priority changed %s -> %s" % (issue['key'], issue['priority'], priority))
                 issue['priority'] = priority
@@ -327,8 +327,9 @@ def check_story_priorities(features, policies, user_stories, modify=False):
     """Infer story priorities from feature and policy priorities as a sanity check.
 
     The story priority calculated will be the lowest of the priorities of the 
-    features and policies it relies upon. A warning will be shown if the actual
-    story priority is lower than this.
+    features and policies it relies upon. An inconsistency warning will be shown
+    if the actual story priority is higher than this, a simple note if it is 
+    lower.
 
     If modify is true, then instead of showing a warning, the priority will be
     changed. This is a BACKWARDS process, it makes more sense
@@ -350,11 +351,13 @@ def check_story_priorities(features, policies, user_stories, modify=False):
         if (priority is None):
             print("No priority calculated for %s, treating as Low" % (issue['key']))
             priority = 'Low'
-        elif (PRIORITY_TO_VALUE[issue['priority']]<PRIORITY_TO_VALUE[priority]):
-            print("%s has priority %s, lower than inferred priority %s" % (issue['key'], issue['priority'], priority))
+        elif (PRIORITY_TO_VALUE[issue['priority']]>PRIORITY_TO_VALUE[priority]):
+            print("INCONSISTENCY: %s has priority %s, higher than inferred priority %s" % (issue['key'], issue['priority'], priority))
             if (modify):
                 print("Setting %s to priority %s" % (issue['key'],priority))
                 issue['priority'] = priority
+        elif (PRIORITY_TO_VALUE[issue['priority']]<PRIORITY_TO_VALUE[priority]):
+            print("%s has priority %s, lower than inferred priority %s" % (issue['key'], issue['priority'], priority))
 
 
 ### Options
