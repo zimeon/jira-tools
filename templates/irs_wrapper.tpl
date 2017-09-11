@@ -14,7 +14,7 @@
 
 \begin{{document}}
 
-\section*{{RepoExec IR Subgroup Report - DRAFT {date}}}
+\section*{{RepoExec IR Subgroup Report - {date}}}
 
 Summary report of features and policies needed to support the institutional
 repository user stories identified by the 
