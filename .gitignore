@@ -1,5 +1,6 @@
 # Ignore configs
 *.cfg
+irs_report.*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
