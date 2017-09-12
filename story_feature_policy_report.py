@@ -8,10 +8,13 @@ Simeon Warner, 2015-09.., 2017-09..
 
 import sys
 import re
-from urllib.parse import urlencode
-from urllib.request import urlopen
+from urllib.parse import urlencode, urljoin
+from urllib.request import urlopen, Request
 from configparser import RawConfigParser
 import xml.etree.ElementTree as ElementTree
+import getpass
+import json
+import logging
 from optparse import OptionParser, OptionGroup
 import html2text
 from datetime import datetime, date
@@ -32,7 +35,7 @@ def html_to_tex(html):
     """Simple wrapper for html2txt with some options and tweak to make TeX."""
     h = html2text.HTML2Text()
     h.body_width = 0  # no wrapping
-    txt = h.handle(html).encode('utf-8').strip()
+    txt = h.handle(html).strip()
     # Remove linebreaks
     txt = re.sub(r'[\r\n]', ' ', txt)
     # Deal with some TeX issues
@@ -59,14 +62,14 @@ def key_number(key):
     return(int(m.group(1)) if (m) else 0)
 
 
-def jira_login_cookie(baseuri, username, password):
+def jira_login_cookie(baseuri, username='', password=''):
     """Jira login to get cookie.
 
     See docs at: https://developer.atlassian.com/jiradev/jira-apis/jira-rest-apis/jira-rest-api-tutorials/jira-rest-api-example-cookie-based-authentication
 
     Can test loging from command line with
 
-    curl -v -H "Content-type: application/json" --data --data '{ "username": "XXX", "password": "YYY" }' https://culibrary.atlassian.net/rest/auth/1/session
+    curl -v -H "Content-type: application/json" --data '{ "username": "XXX", "password": "YYY" }' https://culibrary.atlassian.net/rest/auth/1/session
 
     expect HTTP 200 and JSON content with:
 
@@ -74,7 +77,26 @@ def jira_login_cookie(baseuri, username, password):
 
     where we return the cookie "cloud.session.token=eyJraWQ..."
     """
-    logging.warn("xx")
+    if (username is None or username == ''):
+        logging.warn("No jira username supplied, will not try to login.")
+        return()
+    if (password is None or password == ''):
+        password = getpass.getpass("No jira password supplied, enter now:")
+
+    auth_uri = urljoin(baseuri, 'rest/auth/1/session')
+    logging.warn("Trying Jira login for %s at %s..." % (username, auth_uri))
+    auth_data = json.dumps({'username': username, 'password': password}).encode()
+    req = Request(auth_uri, auth_data, headers={'Content-type': 'application/json'})
+    with urlopen(req) as fh:
+        data = json.loads(fh.read().decode())
+        if ('session' in data and
+                'name' in data['session'] and
+                'value' in data['session'] and
+                data['session']['name'] == 'cloud.session.token'):
+            cookie = data['session']['name'] + '=' + data['session']['value']
+            logging.warn("Got Jira login cookie.")
+            return(cookie)
+        raise Exception("Unexpected response from Jira cookie login")
 
 
 def query_jira(baseuri, query, username, password, fields=None, options=None):
@@ -89,24 +111,24 @@ def query_jira(baseuri, query, username, password, fields=None, options=None):
     For example:
     https://issues.library.cornell.edu/sr/jira.issueviews:searchrequest-xml/temp/SearchRequest.xml?jqlQuery=project+%3D+ARXIVDEV+AND+resolution+%3D+Unresolved+AND+fixVersion+%3D+%22Roadmap+%28Epics%29%22+ORDER+BY+priority+DESC&tempMax=1000&field=key&field=summary
     """
-    params = [('jqlQuery', query), ('tempMax', 1000)]
-    if (username is not None or password is not None):
-        params.append(('os_username', username))
-        params.append(('os_password', password))
+    cookie = jira_login_cookie(baseuri, username, password)
+
+    params = [('jql', query), ('tempMax', 1000)]
     for field in fields:
         params.append(('field', field))
-
-    uri = "%s/sr/jira.issueviews:searchrequest-xml/temp/SearchRequest.xml?%s" % (
-        baseuri, urlencode(params))
+    query_uri = urljoin(baseuri,
+                        'sr/jira.issueviews:searchrequest-xml/temp/SearchRequest.xml?' + urlencode(params))
     if (options.show_uri):
         print(uri)
         sys.exit(0)
-    f = urlopen(uri)
-    if (options.show_xml):
-        print(f.read())
-        sys.exit(0)
-    # return parsed etree
-    return ElementTree.parse(f)
+    req = Request(query_uri, headers={'Cookie': cookie})
+    with urlopen(req) as fh:
+        xml = fh.read().decode("utf-8")
+        if (options.show_xml):
+            print(xml)
+            sys.exit(0)
+        # return parsed etree root element
+        return ElementTree.fromstring(xml)  # FIXME - would be better to parse fh but need to decode
 
 
 relation_translations = {
@@ -117,8 +139,10 @@ relation_translations = {
 }
 
 
-def parse_issue_links(el):
+def parse_issue_links(key, el):
     """Parse issuelinks in etree element el.
+
+    Ket is just used for debugging information.
 
     Example XML:
     <issuelinks>
@@ -152,7 +176,7 @@ def parse_issue_links(el):
             if (linktype in relation_translations):
                 linktype = relation_translations[linktype]
             else:
-                raise Exception("Unexpected outward link: %s" % (linktype))
+                logging.warn("%s: Unexpected outward link type: '%s'" % (key, linktype))
             for issuekey in outwardlink.findall('./issuelink/issuekey'):
                 # print(issuekey.text)
                 if (linktype not in links):
@@ -163,7 +187,7 @@ def parse_issue_links(el):
             if (linktype in relation_translations):
                 linktype = relation_translations[linktype]
             else:
-                raise Exception("Unexpected inward link: %s" % (linktype))
+                logging.warn("%s: Unexpected inward link type: '%s'" % (key, linktype))
             for issuekey in inwardlink.findall('./issuelink/issuekey'):
                 # print(issuekey.text)
                 if (linktype not in links):
@@ -172,52 +196,63 @@ def parse_issue_links(el):
     return(links)
 
 
-def parse_epic_link(el):
+def parse_epic_link(key, el):
     """Extract key of epic this issue belongs to (if given), else ''.
 
     Example XML:
+
     <customfields>
       <customfield id="customfield_10730" key="com.pyxis.greenhopper.jira:gh-epic-link">
         <customfieldname>Epic Link</customfieldname>
         <customfieldvalues>
-          <customfieldvalue>IRS-4</customfieldvalue>
+          <customfieldvalue key="$xmlutils.escape($text)">Maintenance</customfieldvalue>
         </customfieldvalues>
       </customfield>
       ...
     </customfields>
+
+    It seems almost certain that the inclusion of `$xmlutils.escape($text)` is a bug in Jira and
+    that should instead have the actual epic issue key. [2017-09-12]
     """
     if (el is None):
         return('')
     for customfield in el.findall('./customfield'):
         if (customfield.attrib['id'] == "customfield_10730"):
-            return(customfield.find('./customfieldvalues/customfieldvalue').text)
+            field = customfield.find('./customfieldvalues/customfieldvalue')
+            if (field.attrib['key'] == '$xmlutils.escape($text)'):
+                return field.text  # Use epic name if can't get key (Jira bug!)
+            else:
+                return field.attrib['key']
     return('')
 
 
-def split_jira_results(tree, fields):
+def split_jira_results(root, fields):
     """Separate results into features, policies and user_stories."""
     issues = ''
     features = []
     policies = []
     user_stories = []
     epics = []
-    root = tree.getroot()
     num = 0
     for item in root.findall('./channel/item'):
         args = {}
-        for field in (fields + ['customfields']):
+        # Try to find key first so we get useful debugging
+        key = 'UNKNOWN-KEY'
+        for field in (['key'] + fields + ['customfields']):
             el = item.find(field)
             if (field == 'issuelinks'):
-                args[field] = parse_issue_links(el)
+                args[field] = parse_issue_links(key, el)
             elif (field == 'customfields'):
                 # Get epic link if present
-                args['epic'] = parse_epic_link(el)
+                args['epic'] = parse_epic_link(key, el)
             elif (el is None):
                 args[field] = 'FIXME - missing %s' % (field)
             elif (el.text is None):
                 args[field] = None
             else:
                 args[field] = el.text
+                if (field == 'key'):
+                    key = args['key']
         num += 1
         args['num'] = num
         args['summary'] = html_to_tex(args['summary'])
@@ -227,7 +262,6 @@ def split_jira_results(tree, fields):
             args['description'] = args['summary']
         if (not re.search(r'[\?\!\.]$', args['description'])):
             args['description'] += '.'
-        key = args['key']
         args['keytarget'] = "\\hypertarget{%s}{}" % (key)
         args['keyref'] = "\\hyperlink{%s}{%s}" % (key, key)
         # print(key+" --epic--> "+args['epic'])
@@ -263,7 +297,11 @@ def split_jira_results(tree, fields):
 
 
 def add_epic_names(issues, epics):
-    """Add a field epic_name to each issue."""
+    """Add a field epic_name to each issue.
+
+    If we can't get a name from the supposed key then just use the key
+    value as the name.
+    """
     for issue in issues:
         if ('epic' in issue):
             epic_key = issue['epic']
@@ -274,7 +312,8 @@ def add_epic_names(issues, epics):
                         issue['epic_name'], issue['epic_name'])
                     break
             if ('epic_name' not in issue):
-                raise Exception("%s: Failed to find epic name for %s" % (issue['key'], epic_key))
+                logging.warn("%s: Failed to find epic name for %s (using this)" % (issue['key'], epic_key))
+                issue['epic_name'] = epic_key
 
 
 def add_story_epics(issues, user_stories_by_key):
@@ -306,8 +345,7 @@ def add_related(issues):
                 targets = []
                 for target in sorted(issue['issuelinks'][linktype], key=key_number):
                     targets.append("\\hyperlink{%s}{%s}" % (target, target))
-                issue['related'] += '\n' + linktype + \
-                    ': ' + ', '.join(targets) + '\n'
+                issue['related'] += '\n' + linktype + ': ' + ', '.join(targets) + '\n'
 
 
 def get_issue(issues, target, msg="issues"):
@@ -441,8 +479,8 @@ if (not query):
     raise Exception("No query in config!")
 
 # Get data from Jira
-tree = query_jira(baseuri, query, username, password, fields, options)
-(features, policies, user_stories, epics) = split_jira_results(tree, fields)
+root = query_jira(baseuri, query, username, password, fields, options)
+(features, policies, user_stories, epics) = split_jira_results(root, fields)
 add_epic_names(user_stories, epics)
 user_stories_by_key = {}
 for issue in user_stories:
