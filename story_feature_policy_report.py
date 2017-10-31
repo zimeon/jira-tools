@@ -312,7 +312,7 @@ def add_epic_names(issues, epics):
                         issue['epic_name'], issue['epic_name'])
                     break
             if ('epic_name' not in issue):
-                logging.warn("%s: Failed to find epic name for %s (using this)" % (issue['key'], epic_key))
+                logging.debug("%s: Failed to find epic name for %s (using this)" % (issue['key'], epic_key))
                 issue['epic_name'] = epic_key
 
 
