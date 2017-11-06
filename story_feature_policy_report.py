@@ -119,7 +119,7 @@ def query_jira(baseuri, query, username, password, fields=None, options=None):
     query_uri = urljoin(baseuri,
                         'sr/jira.issueviews:searchrequest-xml/temp/SearchRequest.xml?' + urlencode(params))
     if (options.show_uri):
-        print(uri)
+        print(query_uri)
         sys.exit(0)
     req = Request(query_uri, headers={'Cookie': cookie})
     with urlopen(req) as fh:
@@ -238,13 +238,16 @@ def split_jira_results(root, fields):
         args = {}
         # Try to find key first so we get useful debugging
         key = 'UNKNOWN-KEY'
-        for field in (['key'] + fields + ['customfields']):
+        for field in (['key'] + fields + ['timeestimate', 'customfields']):
             el = item.find(field)
             if (field == 'issuelinks'):
                 args[field] = parse_issue_links(key, el)
             elif (field == 'customfields'):
                 # Get epic link if present
                 args['epic'] = parse_epic_link(key, el)
+            elif (field == 'timeestimate' and el is not None):
+                # Get estimate in seconds
+                args['days'] = float(el.attrib['seconds']) / 86400   # days work
             elif (el is None):
                 args[field] = 'FIXME - missing %s' % (field)
             elif (el.text is None):
@@ -274,6 +277,8 @@ def split_jira_results(root, fields):
             args['summary'] = summary
             if (args['priority'] not in PRIORITIES):
                 raise Exception("%s: is Feature with bad priority %s" % (key, args['priority']))
+            if ('days' not in args):
+                logging.warn("%s: is %s priority Feature without effort estimate" % (key, args['priority']))
             features.append(args)
         elif (args['type'] == 'Policy Question'):
             args['type'] = 'Policy'
@@ -437,6 +442,24 @@ def check_story_priorities(features, policies, user_stories, modify=False):
             print("%s has priority %s, lower than inferred priority %s" %
                   (issue['key'], issue['priority'], priority))
 
+def add_effort_estimates(features):
+    """Loop over all features and add up estimates grouped by priority."""
+    totals = {}
+    missing = {}
+    for issue in features:
+        priority = issue['priority']
+        if (priority not in totals):
+            totals[priority] = 0.0
+            missing[priority] = []
+        if ('days' in issue):
+            totals[priority] += issue['days']
+        else:
+            missing[priority].append(issue['key'])
+    for priority in sorted(totals.keys()):
+        print("Effort estimate for %s features = %.1d days" % (priority, totals[priority]))
+        if (len(missing[priority]) > 0):
+            print("  (missing estimates for " + ','.join(missing[priority]) + ')')
+
 
 # Options
 #
@@ -473,7 +496,7 @@ query = config.get(section, 'query')
 # https://confluence.atlassian.com/jira/displaying-search-results-in-xml-185729644.html
 # for a description of fields available
 fields = ['key', 'type', 'summary', 'description', 'status',
-          'link', 'component', 'priority', 'issuelinks', 'allcustom']
+          'link', 'component', 'priority', 'issuelinks', 'timetracking', 'allcustom']
 
 if (not query):
     raise Exception("No query in config!")
@@ -500,6 +523,10 @@ infer_feature_policy_priorities(user_stories, features, policies)
 # Sanity check than inference the other way works...
 print("\nChecking story priorities")
 check_story_priorities(features, policies, user_stories)
+print("")
+
+print("\nAdding up effort estimates for each priority")
+add_effort_estimates(features)
 print("")
 
 script_dir = os.path.dirname(__file__)
