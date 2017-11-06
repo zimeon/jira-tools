@@ -444,19 +444,22 @@ def check_story_priorities(features, policies, user_stories, modify=False):
 
 def add_effort_estimates(features):
     """Loop over all features and add up estimates grouped by priority."""
+    num = {}
     totals = {}
     missing = {}
     for issue in features:
         priority = issue['priority']
         if (priority not in totals):
+            num[priority] = 0
             totals[priority] = 0.0
             missing[priority] = []
+        num[priority] += 1
         if ('days' in issue):
             totals[priority] += issue['days']
         else:
             missing[priority].append(issue['key'])
     for priority in sorted(totals.keys()):
-        print("Effort estimate for %s features = %.1d days" % (priority, totals[priority]))
+        print("Effort estimate for %d %s features = %.1d days" % (num[priority], priority, totals[priority]))
         if (len(missing[priority]) > 0):
             print("  (missing estimates for " + ','.join(missing[priority]) + ')')
 
