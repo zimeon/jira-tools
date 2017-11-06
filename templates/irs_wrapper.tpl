@@ -2,7 +2,7 @@
 \renewcommand{{\familydefault}}{{\sfdefault}}
 \usepackage{{helvet}}
 %\usepackage{{times}}
-\usepackage[pdftitle={{RepoExec IR Subgroup Report}},colorlinks=false,urlbordercolor={{0.9 0.9 0.9}},citebordercolor={{0.9 0.9 0.9}},linkbordercolor={{0.9 0.9 0.9}}]{{hyperref}}
+\usepackage[pdftitle={{Samvera IR Evaluation - Feature, Policy, Story Appendix}},colorlinks=false,urlbordercolor={{0.9 0.9 0.9}},citebordercolor={{0.9 0.9 0.9}},linkbordercolor={{0.9 0.9 0.9}}]{{hyperref}}
 \urlstyle{{sf}}
 
 \setlength{{\parindent}}{{0mm}}
@@ -14,13 +14,12 @@
 
 \begin{{document}}
 
-\section*{{RepoExec IR Subgroup Report - {date}}}
+\section*{{Samvera IR Evaluation - Feature, Policy, Story Appendix - {date}}}
 
 Summary report of features and policies needed to support the institutional
-repository user stories identified by the 
-\href{{https://confluence.cornell.edu/x/MzF0Ew}}{{IR User Stories Working Group}}.
-Prepared by the 
-\href{{https://confluence.cornell.edu/x/pwxSDg}}{{RepoExec}} IR Subgroup.
+repository user stories first identified by the 
+\href{{https://confluence.cornell.edu/x/MzF0Ew}}{{IR User Stories Working Group 2015}}
+and subsequently updated for the Samvera IR Evaluation 2017.
 This report is intended as a resource to help guide the continuing 
 development of a Sufia-Hydra based IR solution for Cornell University.
 
@@ -30,17 +29,19 @@ development of a Sufia-Hydra based IR solution for Cornell University.
 \clearpage
 \section{{Methodology}}
 
-Each user story from the the IR User Stories Working Group report was 
-interrogated to determine which features and policies would be necessary 
-to support that user story. This method resulted in a list of features 
-and policies, which were then prioritized as \textbf{{Critical}}, 
-\textbf{{Major}}, or \textbf{{Low}}, using the following criteria:
+Each user story was interrogated to determine which features and policies
+would be necessary to support that user story. This method resulted in a
+list of features and policies, which were then prioritized as 
+\textbf{{Critical}}, \textbf{{Major}}, or \textbf{{Low}}, using the
+following criteria:
 
 \begin{{itemize}} 
 \item \textbf{{Critical}} - This feature is a core function of the repository,
 absolutely necessary for its operation. Reasons a feature is
-considered textbf{{Critical}} include but are not limited to:
+considered \textbf{{Critical}} include but are not limited to:
 \begin{{itemize}}
+\item relied upon by existing eCommons DSpace, DC@ILR DigitalCommons@ILR, and/or
+SHA Scholarly Commons repositories
 \item many user stories rely on the feature
 \item funding or institutional obligations depend on the feature
 \item a significant minority of users rely on the feature
