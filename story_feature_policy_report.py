@@ -225,6 +225,38 @@ def parse_epic_link(key, el):
                 return field.attrib['key']
     return('')
 
+def parse_timeestimate(key, el):
+    """Get work time in days for time estimate.
+
+    Assume that:
+       week => 5 days
+       day => 1 day
+       hour => 1/8 day
+       minute => 1/(8*60) day etc.
+    """
+    m = re.match(r'''^(\d+(\.\d+)?)\s+(\w+)$''', el.text)
+    if (m):
+        t = float(m.group(1))
+        unit = m.group(3).rstrip('s')
+        if (unit == 'month'):
+            t *= 21.7  # approx work days in month
+        elif (unit == 'week'):
+            t *= 5
+        elif (unit == 'day'):
+            pass
+        elif (unit == 'hour'):
+            t /= 8.0
+        elif (unit == 'minute'):
+            t /= (8.0 * 60.0)
+        elif (unit == 'second'):
+            t /= (8.0 * 60.0 * 60.0)
+        else:
+            logging.warn("Failed to parse time unit '%s' in '%s'" % (unit, el.text))
+            return 0.0
+        return t
+    else:
+        logging.warn("Failed to parse time estimate '%s'" % (el.text))
+        return 0.0
 
 def split_jira_results(root, fields):
     """Separate results into features, policies and user_stories."""
@@ -247,7 +279,7 @@ def split_jira_results(root, fields):
                 args['epic'] = parse_epic_link(key, el)
             elif (field == 'timeestimate' and el is not None):
                 # Get estimate in seconds
-                args['days'] = float(el.attrib['seconds']) / 86400   # days work
+                args['days'] = parse_timeestimate(key, el)
             elif (el is None):
                 args[field] = 'FIXME - missing %s' % (field)
             elif (el.text is None):
@@ -459,7 +491,7 @@ def add_effort_estimates(features):
         else:
             missing[priority].append(issue['key'])
     for priority in sorted(totals.keys()):
-        print("Effort estimate for %d %s features = %.1d days" % (num[priority], priority, totals[priority]))
+        print("Effort estimate for %d %s features = %.1d work days" % (num[priority], priority, totals[priority]))
         if (len(missing[priority]) > 0):
             print("  (missing estimates for " + ','.join(missing[priority]) + ')')
 
