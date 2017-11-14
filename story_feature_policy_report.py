@@ -225,6 +225,7 @@ def parse_epic_link(key, el):
                 return field.attrib['key']
     return('')
 
+
 def parse_timeestimate(key, el):
     """Get work time in days for time estimate.
 
@@ -233,8 +234,21 @@ def parse_timeestimate(key, el):
        day => 1 day
        hour => 1/8 day
        minute => 1/(8*60) day etc.
+
+    Match mixed, '1w, 3d' etc.
     """
-    m = re.match(r'''^(\d+(\.\d+)?)\s+(\w+)$''', el.text)
+    t = 0.0
+    try:
+        for clause in re.split(r''',\s?''', el.text):
+            t += parse_timeestimate_clause(clause)
+    except Exception as e:
+        logging.warn("Failed to parse time extimate '%s' (%s)" % (el.text, str(e)))
+    return t
+
+
+def parse_timeestimate_clause(clause):
+    """Parse one element of time estimate to return days equivalent."""
+    m = re.match(r'''^(\d+(\.\d+)?)\s+(\w+)$''', clause)
     if (m):
         t = float(m.group(1))
         unit = m.group(3).rstrip('s')
@@ -251,12 +265,11 @@ def parse_timeestimate(key, el):
         elif (unit == 'second'):
             t /= (8.0 * 60.0 * 60.0)
         else:
-            logging.warn("Failed to parse time unit '%s' in '%s'" % (unit, el.text))
-            return 0.0
+            raise Exception("Bad time unit '%s' in '%s'" % (unit, clause))
         return t
     else:
-        logging.warn("Failed to parse time estimate '%s'" % (el.text))
-        return 0.0
+        raise Exception("Failed to parse time estimate '%s'" % (clause))
+
 
 def split_jira_results(root, fields):
     """Separate results into features, policies and user_stories."""
@@ -473,6 +486,7 @@ def check_story_priorities(features, policies, user_stories, modify=False):
         elif (PRIORITY_TO_VALUE[issue['priority']] < PRIORITY_TO_VALUE[priority]):
             print("%s has priority %s, lower than inferred priority %s" %
                   (issue['key'], issue['priority'], priority))
+
 
 def add_effort_estimates(features):
     """Loop over all features and add up estimates grouped by priority."""
