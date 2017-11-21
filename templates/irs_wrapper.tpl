@@ -14,14 +14,19 @@
 
 \begin{{document}}
 
-\section*{{Samvera IR Evaluation - Feature, Policy, Story Appendix - {date}}}
+\section*{{Samvera Evaluation}}
+
+\section*{{Appendix 1. - A comparison of current bepress and DSpace IR features list (generated from the IR user stories work) mapped to current status of Samvera/Hyrax development}}
+
+\textit{{{date}}}
 
 Summary report of features and policies needed to support the institutional
-repository user stories first identified by the 
+repository (IR) user stories first identified by the 
 \href{{https://confluence.cornell.edu/x/MzF0Ew}}{{IR User Stories Working Group 2015}}
 and subsequently updated for the Samvera IR Evaluation 2017.
 This report is intended as a resource to help guide the continuing 
-development of a Sufia-Hydra based IR solution for Cornell University.
+development of a Samvera/Hyrax based IR solution within Cornell
+University Library.
 
 \setcounter{{tocdepth}}{{2}}
 \tableofcontents
